@@ -1,3 +1,8 @@
 {
-  "item.chronorelic.chrono_watch": "§dChrono Watch"
+  "item.chronorelic.chrono_watch": "§dChrono Watch",
+  "message.chronorelic.anchor_set": "§b[Chrono Watch] §fSpatial-temporal anchor recorded.",
+  "message.chronorelic.no_anchor": "§c[Chrono Watch] §7No anchor recorded. Sneak + Right-Click to set one.",
+  "message.chronorelic.wrong_dimension": "§c[Chrono Watch] §7Cannot rewind across different dimensions.",
+  "message.chronorelic.rewound": "§d[Chrono Watch] §fRewound to anchor.",
+  "message.chronorelic.death_prevented": "§6[Chrono Watch] §eFate rewritten! Fatal damage prevented."
 }

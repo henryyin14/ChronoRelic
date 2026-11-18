@@ -1,3 +1,8 @@
 {
-  "item.chronorelic.chrono_watch": "§d『时渊怀表』"
+  "item.chronorelic.chrono_watch": "§d时渊怀表",
+  "message.chronorelic.anchor_set": "§b[时渊怀表] §f时空锚点已刻录。",
+  "message.chronorelic.no_anchor": "§c[时渊怀表] §7尚未刻录锚点，请按住 Shift + 右键设置。",
+  "message.chronorelic.wrong_dimension": "§c[时渊怀表] §7无法跨维度触发时空回溯。",
+  "message.chronorelic.rewound": "§d[时渊怀表] §f已回溯至时空锚点。",
+  "message.chronorelic.death_prevented": "§6[时渊怀表] §e命运改写！已抵消致命伤害。"
 }

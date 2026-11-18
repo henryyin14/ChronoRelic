@@ -14,7 +14,7 @@ public abstract class LivingEntityMixin {
     @Inject(method = "setHealth", at = @At("HEAD"), cancellable = true)
     private void onFatalHealthChange(float health, CallbackInfo ci) {
         if (health <= 0.0F && (Object) this instanceof ServerPlayer player) {
-            if (ChronoWatchItem.tryEmergencyRewind(player)) {
+            if (ChronoWatchItem.tryTriggerDeathSave(player)) {
                 ci.cancel();
             }
         }

@@ -24,137 +24,147 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ChronoWatchItem extends Item {
 
-    public record ChronoAnchor(
-        ResourceKey<Level> dimension,
-        Vec3 pos,
-        float yaw,
-        float pitch,
-        float health,
-        int foodLevel
-    ) {}
+    private static final Map<UUID, AnchorData> ANCHORS = new ConcurrentHashMap<>();
 
-    private static final Map<UUID, ChronoAnchor> ANCHORS = new ConcurrentHashMap<>();
+    private record AnchorData(
+            ResourceKey<Level> dimension,
+            Vec3 pos,
+            float yRot,
+            float xRot,
+            float health,
+            int foodLevel,
+            float saturation
+    ) {}
 
     public ChronoWatchItem(Properties properties) {
         super(properties);
     }
 
     @Override
-    public boolean isFoil(ItemStack stack) {
-        return true;
-    }
-
-    @Override
     public InteractionResult use(Level level, Player player, InteractionHand hand) {
+        if (level.isClientSide()) {
+            return InteractionResult.SUCCESS;
+        }
+
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.PASS;
+        }
+
         ItemStack stack = player.getItemInHand(hand);
 
-        if (level.isClientSide() || !(player instanceof ServerPlayer serverPlayer)) {
-            return InteractionResult.SUCCESS;
-        }
+        // Shift + 右键：刻录时空锚点
+        if (player.isShiftKeyDown()) {
+            ANCHORS.put(player.getUUID(), new AnchorData(
+                    level.dimension(),
+                    player.position(),
+                    player.getYRot(),
+                    player.getXRot(),
+                    player.getHealth(),
+                    player.getFoodData().getFoodLevel(),
+                    player.getFoodData().getSaturationLevel()
+            ));
 
-        ServerLevel serverLevel = (ServerLevel) level;
-
-        if (serverPlayer.isShiftKeyDown()) {
-            ChronoAnchor anchor = new ChronoAnchor(
-                serverLevel.dimension(),
-                serverPlayer.position(),
-                serverPlayer.getYRot(),
-                serverPlayer.getXRot(),
-                serverPlayer.getHealth(),
-                serverPlayer.getFoodData().getFoodLevel()
+            if (level instanceof ServerLevel serverLevel) {
+                serverLevel.sendParticles(
+                        ParticleTypes.END_ROD,
+                        player.getX(), player.getY() + 1.0, player.getZ(),
+                        25, 0.4, 0.6, 0.4, 0.05
+                );
+            }
+            level.playSound(
+                    null,
+                    player.getX(), player.getY(), player.getZ(),
+                    SoundEvents.BEACON_ACTIVATE,
+                    SoundSource.PLAYERS,
+                    0.8F, 1.2F
             );
-            ANCHORS.put(serverPlayer.getUUID(), anchor);
-
-            serverLevel.sendParticles(ParticleTypes.END_ROD,
-                anchor.pos.x, anchor.pos.y + 1.0, anchor.pos.z,
-                35, 0.5, 0.8, 0.5, 0.05);
-            serverLevel.playSound(null, serverPlayer.blockPosition(),
-                SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 0.8F, 1.5F);
-
-            serverPlayer.sendSystemMessage(
-                Component.literal("§b[时渊怀表] §f已刻录当前时空锚点"), true);
+            serverPlayer.sendSystemMessage(Component.translatable("message.chronorelic.anchor_set"), true);
             return InteractionResult.SUCCESS;
         }
 
-        if (serverPlayer.getCooldowns().isOnCooldown(stack)) {
-            serverPlayer.sendSystemMessage(
-                Component.literal("§c[时渊怀表] §7时空能量正在冷却中..."), true);
-            return InteractionResult.FAIL;
-        }
-
-        if (executeRewind(serverPlayer, false)) {
-            serverPlayer.getCooldowns().addCooldown(stack, 200);
-            return InteractionResult.SUCCESS;
-        } else {
-            serverPlayer.sendSystemMessage(
-                Component.literal("§e[时渊怀表] §7请先按住 Shift + 右键刻录锚点"), true);
-            return InteractionResult.FAIL;
-        }
+        // 直接右键：主动触发时空回溯
+        return executeRewind(serverPlayer, stack, false) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
     }
 
-    public static boolean tryEmergencyRewind(ServerPlayer player) {
-        ItemStack watchStack = ItemStack.EMPTY;
+    public static boolean tryTriggerDeathSave(ServerPlayer player) {
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
-            ItemStack s = player.getInventory().getItem(i);
-            if (s.is(ChronoRelicMod.CHRONO_WATCH)) {
-                watchStack = s;
-                break;
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack.is(ChronoRelicMod.CHRONO_WATCH) && !player.getCooldowns().isOnCooldown(stack)) {
+                return executeRewind(player, stack, true);
             }
-        }
-
-        if (watchStack.isEmpty() || player.getCooldowns().isOnCooldown(watchStack)) {
-            return false;
-        }
-
-        if (executeRewind(player, true)) {
-            player.getCooldowns().addCooldown(watchStack, 900);
-            return true;
         }
         return false;
     }
 
-    private static boolean executeRewind(ServerPlayer player, boolean isEmergency) {
-        ChronoAnchor anchor = ANCHORS.get(player.getUUID());
-        ServerLevel currentLevel = (ServerLevel) player.level();
-
-        if (anchor == null || !anchor.dimension().equals(currentLevel.dimension())) {
+    private static boolean executeRewind(ServerPlayer player, ItemStack stack, boolean isDeathSave) {
+        AnchorData anchor = ANCHORS.get(player.getUUID());
+        if (anchor == null) {
+            if (!isDeathSave) {
+                player.sendSystemMessage(Component.translatable("message.chronorelic.no_anchor"), true);
+            }
             return false;
         }
 
-        Vec3 oldPos = player.position();
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
 
-        List<LivingEntity> nearby = currentLevel.getEntitiesOfClass(
-            LivingEntity.class,
-            player.getBoundingBox().inflate(5.0),
-            e -> e != player && e.isAlive()
+        if (!serverLevel.dimension().equals(anchor.dimension())) {
+            if (!isDeathSave) {
+                player.sendSystemMessage(Component.translatable("message.chronorelic.wrong_dimension"), true);
+            }
+            return false;
+        }
+
+        // 1. 原地释放声波冲击并震飞周围 5 格生物
+        Vec3 origin = player.position();
+        serverLevel.sendParticles(ParticleTypes.SONIC_BOOM, origin.x, origin.y + 1.0, origin.z, 1, 0.0, 0.0, 0.0, 0.0);
+        serverLevel.playSound(null, origin.x, origin.y, origin.z, SoundEvents.WARDEN_SONIC_BOOM, SoundSource.PLAYERS, 0.8F, 1.3F);
+
+        List<LivingEntity> nearbyEntities = serverLevel.getEntitiesOfClass(
+                LivingEntity.class,
+                player.getBoundingBox().inflate(5.0),
+                entity -> entity != player && entity.isAlive()
         );
-        for (LivingEntity target : nearby) {
-            Vec3 push = target.position().subtract(oldPos).normalize().scale(1.6);
-            target.push(push.x, 0.55, push.z);
+        for (LivingEntity target : nearbyEntities) {
+            Vec3 push = target.position().subtract(origin);
+            Vec3 horizontal = push.lengthSqr() > 1.0E-4 ? push.normalize().scale(1.6) : new Vec3(0.0, 0.0, 0.0);
+            target.push(horizontal.x, 0.45, horizontal.z);
             target.hurtMarked = true;
         }
 
-        currentLevel.sendParticles(ParticleTypes.SONIC_BOOM,
-            oldPos.x, oldPos.y + 1.0, oldPos.z, 1, 0, 0, 0, 0);
+        // 2. 传送回锚点并恢复状态
+        player.teleportTo(anchor.pos().x, anchor.pos().y, anchor.pos().z);
+        player.setYRot(anchor.yRot());
+        player.setXRot(anchor.xRot());
 
-        player.teleportTo(anchor.pos.x, anchor.pos.y, anchor.pos.z);
-        player.setYRot(anchor.yaw);
-        player.setXRot(anchor.pitch);
-        player.resetFallDistance();
-        player.setHealth(Math.max(anchor.health, 6.0F));
-        player.getFoodData().setFoodLevel(anchor.foodLevel);
+        player.setHealth(Math.max(anchor.health(), 6.0F));
+        player.getFoodData().setFoodLevel(anchor.foodLevel());
+        player.getFoodData().setSaturation(anchor.saturation());
         player.removeAllEffects();
+        player.resetFallDistance();
 
-        currentLevel.sendParticles(ParticleTypes.PORTAL,
-            anchor.pos.x, anchor.pos.y + 1.0, anchor.pos.z,
-            50, 0.6, 0.9, 0.6, 0.1);
-        currentLevel.playSound(null, player.blockPosition(),
-            SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 1.0F, 1.2F);
+        serverLevel.sendParticles(
+                ParticleTypes.PORTAL,
+                anchor.pos().x, anchor.pos().y + 1.0, anchor.pos().z,
+                40, 0.4, 0.6, 0.4, 0.1
+        );
+        serverLevel.playSound(
+                null,
+                anchor.pos().x, anchor.pos().y, anchor.pos().z,
+                SoundEvents.ENDERMAN_TELEPORT,
+                SoundSource.PLAYERS,
+                1.0F, 1.1F
+        );
 
-        String msg = isEmergency
-            ? "§d[命运改写] §f怀表破碎虚空，已将你从死亡边缘拉回锚点！"
-            : "§b[时渊怀表] §f时空已倒流至锚点";
-        player.sendSystemMessage(Component.literal(msg), true);
+        // 3. 设置冷却并发送多语言提示（主动 10 秒 = 200 ticks，濒死保命 45 秒 = 900 ticks）
+        player.getCooldowns().addCooldown(stack, isDeathSave ? 900 : 200);
+        if (isDeathSave) {
+            player.sendSystemMessage(Component.translatable("message.chronorelic.death_prevented"), true);
+        } else {
+            player.sendSystemMessage(Component.translatable("message.chronorelic.rewound"), true);
+        }
+
         return true;
     }
 }
