@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.example.chronorelic.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "LivingEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

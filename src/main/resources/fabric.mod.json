@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "chronorelic",
+  "version": "1.0.0",
+  "name": "ChronoRelic",
+  "description": "Adds the Chrono Watch: record spatial-temporal anchors, rewind position/health/hunger with a sonic shockwave, and cheat death automatically.",
+  "authors": [
+    "Henry"
+  ],
+  "contact": {
+    "sources": "https://github.com/henryyin14/ChronoRelic"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.example.chronorelic.ChronoRelicMod"
+    ]
+  },
+  "mixins": [
+    "chronorelic.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.2",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
